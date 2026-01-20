@@ -1,130 +1,159 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import plotly.graph_objects as go
 
+
+# ============================================================
+# PAGE CONFIG
+# ============================================================
 st.set_page_config(
     page_title="Financial Health Checker",
-    layout="wide"
+    layout="centered"
 )
 
-st.title("📊 Financial Health Checker")
-st.write("Analyze a listed company’s financial health using key ratios and 5-year trends.")
+st.title("🏦 Financial Health Checker")
+st.markdown("Analyze a company’s **market performance, financial strength, and valuation**.")
 
-# -----------------------------
-# Helper function
-# -----------------------------
-def safe_get(df, row):
-    try:
-        return df.loc[row]
-    except:
-        return None
+# ============================================================
+# USER INPUT
+# ============================================================
+ticker_symbol = st.text_input(
+    "Enter Stock Ticker (e.g. AAPL, MSFT, RELIANCE.NS)",
+    value="AAPL"
+).upper()
 
-# -----------------------------
-# Fetch 5-year financial data
-# -----------------------------
-def fetch_financials_5y(ticker):
+if not ticker_symbol:
+    st.stop()
+
+# ============================================================
+# FETCH DATA
+# ============================================================
+@st.cache_data
+def load_company_data(ticker):
     stock = yf.Ticker(ticker)
+    hist = stock.history(period="max")
+    info = stock.info
+    financials = stock.financials
+    balance_sheet = stock.balance_sheet
+    return hist, info, financials, balance_sheet
 
-    income = stock.financials
-    balance = stock.balance_sheet
+try:
+    hist, info, financials, balance_sheet = load_company_data(ticker_symbol)
+except Exception:
+    st.error("Invalid ticker or data unavailable.")
+    st.stop()
 
-    if income.empty or balance.empty:
-        raise ValueError("Financial data not available for this company.")
+# ============================================================
+# MARKET PRICE METRICS
+# ============================================================
+st.subheader("📈 Market Price Overview")
 
-    df = pd.DataFrame({
-        "Revenue": safe_get(income, "Total Revenue"),
-        "Net Income": safe_get(income, "Net Income"),
-        "Current Assets": safe_get(balance, "Current Assets"),
-        "Current Liabilities": safe_get(balance, "Current Liabilities"),
-        "Total Liabilities": safe_get(balance, "Total Liabilities Net Minority Interest"),
-        "Equity": safe_get(balance, "Stockholders Equity"),
-    })
+all_time_high = hist["High"].max()
+all_time_low = hist["Low"].min()
 
-    return df.dropna()
+fifty_two_week_data = hist.last("365D")
+high_52w = fifty_two_week_data["High"].max()
+low_52w = fifty_two_week_data["Low"].min()
 
-# -----------------------------
-# Calculate financial ratios
-# -----------------------------
-def calculate_ratios(df):
-    ratios = pd.DataFrame(index=df.index)
+col1, col2 = st.columns(2)
 
-    ratios["Net Profit Margin"] = df["Net Income"] / df["Revenue"]
-    ratios["ROE"] = df["Net Income"] / df["Equity"]
-    ratios["Debt to Equity"] = df["Total Liabilities"] / df["Equity"]
-    ratios["Current Ratio"] = df["Current Assets"] / df["Current Liabilities"]
+col1.metric("All-Time High", f"${all_time_high:,.2f}")
+col1.metric("52-Week High", f"${high_52w:,.2f}")
 
-    return ratios.round(2)
+col2.metric("All-Time Low", f"${all_time_low:,.2f}")
+col2.metric("52-Week Low", f"${low_52w:,.2f}")
 
-# -----------------------------
-# Rule-based health assessment
-# -----------------------------
-def financial_health_verdict(latest):
-    score = 0
-    observations = []
+# ============================================================
+# PRICE CHART
+# ============================================================
+st.subheader("📉 Share Price History")
 
-    if latest["Net Profit Margin"] > 0.10:
-        score += 1
-        observations.append("Healthy profitability")
-    else:
-        observations.append("Weak profit margins")
+fig_price = go.Figure()
+fig_price.add_trace(go.Scatter(
+    x=hist.index,
+    y=hist["Close"],
+    name="Close Price"
+))
 
-    if latest["ROE"] > 0.15:
-        score += 1
-        observations.append("Strong return on equity")
-    else:
-        observations.append("Low return on equity")
-
-    if latest["Debt to Equity"] < 1.5:
-        score += 1
-        observations.append("Debt levels are manageable")
-    else:
-        observations.append("High leverage risk")
-
-    if latest["Current Ratio"] > 1.2:
-        score += 1
-        observations.append("Good short-term liquidity")
-    else:
-        observations.append("Liquidity risk")
-
-    if score >= 3:
-        verdict = "🟢 Strong Financial Health"
-    elif score == 2:
-        verdict = "🟡 Moderate Financial Health"
-    else:
-        verdict = "🔴 Weak Financial Health"
-
-    return verdict, observations
-
-# -----------------------------
-# Streamlit UI
-# -----------------------------
-ticker = st.text_input(
-    "Enter listed company ticker (e.g. AAPL, MSFT, RELIANCE.NS, TCS.NS)"
+fig_price.update_layout(
+    xaxis_title="Date",
+    yaxis_title="Price",
+    hovermode="x unified"
 )
 
-if st.button("Analyze Company"):
-    try:
-        financials_df = fetch_financials_5y(ticker)
-        ratios_df = calculate_ratios(financials_df)
+st.plotly_chart(fig_price, use_container_width=True)
 
-        st.subheader("📌 Financial Data (Last 5 Years)")
-        st.dataframe(financials_df)
+# ============================================================
+# KEY FINANCIAL RATIOS
+# ============================================================
+st.subheader("📊 Key Financial Ratios")
 
-        st.subheader("📈 Financial Ratios (5-Year Trend)")
-        st.dataframe(ratios_df)
+def safe_get(key):
+    value = info.get(key)
+    return round(value, 2) if isinstance(value, (int, float)) else "N/A"
 
-        st.subheader("📊 Ratio Trends")
-        st.line_chart(ratios_df)
+ratios = {
+    "P/E Ratio": safe_get("trailingPE"),
+    "Price to Book": safe_get("priceToBook"),
+    "Debt to Equity": safe_get("debtToEquity"),
+    "Profit Margin": safe_get("profitMargins"),
+    "Return on Equity (ROE)": safe_get("returnOnEquity"),
+}
 
-        latest_ratios = ratios_df.iloc[:, 0]
-        verdict, notes = financial_health_verdict(latest_ratios)
+st.table(pd.DataFrame(ratios.items(), columns=["Metric", "Value"]))
 
-        st.subheader("✅ Financial Health Verdict")
-        st.success(verdict)
+# ============================================================
+# FINANCIAL STATEMENTS SNAPSHOT
+# ============================================================
+st.subheader("💰 Financial Snapshot")
 
-        st.subheader("🔍 Key Observations")
-        for note in notes:
-            st.write(f"- {note}")
+try:
+    revenue = financials.loc["Total Revenue"].iloc[0]
+    net_income = financials.loc["Net Income"].iloc[0]
+    total_assets = balance_sheet.loc["Total Assets"].iloc[0]
+    total_liabilities = balance_sheet.loc["Total Liab"].iloc[0]
 
-    except Exception as e:
-        st.error(str(e))
+    fin_col1, fin_col2 = st.columns(2)
+
+    fin_col1.metric("Total Revenue", f"${revenue:,.0f}")
+    fin_col1.metric("Net Income", f"${net_income:,.0f}")
+
+    fin_col2.metric("Total Assets", f"${total_assets:,.0f}")
+    fin_col2.metric("Total Liabilities", f"${total_liabilities:,.0f}")
+
+except Exception:
+    st.warning("Detailed financial statements not available.")
+
+# ============================================================
+# BASIC HEALTH INTERPRETATION
+# ============================================================
+st.subheader("🧠 Financial Health Interpretation")
+
+interpretation = []
+
+if isinstance(ratios["Debt to Equity"], (int, float)) and ratios["Debt to Equity"] > 150:
+    interpretation.append("⚠️ High leverage — company relies heavily on debt.")
+else:
+    interpretation.append("✅ Debt levels appear manageable.")
+
+if isinstance(ratios["Profit Margin"], (int, float)) and ratios["Profit Margin"] < 0:
+    interpretation.append("⚠️ Company is currently unprofitable.")
+else:
+    interpretation.append("✅ Company is generating profits.")
+
+if isinstance(ratios["P/E Ratio"], (int, float)) and ratios["P/E Ratio"] > 30:
+    interpretation.append("⚠️ Valuation appears expensive relative to earnings.")
+else:
+    interpretation.append("✅ Valuation appears reasonable.")
+
+for point in interpretation:
+    st.write(point)
+
+# ============================================================
+# FOOTER
+# ============================================================
+st.caption(
+    "Educational use only. Data sourced via Yahoo Finance. "
+    "Not investment advice."
+)
