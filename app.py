@@ -125,10 +125,35 @@ else:
 # ============================================================
 # BALANCE SHEET OVERVIEW
 # ============================================================
+def get_first_available_row(df, possible_names):
+    for name in possible_names:
+        if name in df.index:
+            return df.loc[name]
+    return None
+
+
+
 st.subheader("🏦 Balance Sheet Overview")
 
-if not balance_sheet.empty:
-    bs_df = balance_sheet.loc[["Total Assets", "Total Liab"]].T
+assets_row = get_first_available_row(
+    balance_sheet,
+    ["Total Assets"]
+)
+
+liabilities_row = get_first_available_row(
+    balance_sheet,
+    [
+        "Total Liab",
+        "Total Liabilities",
+        "Total Liabilities Net Minority Interest"
+    ]
+)
+
+if assets_row is not None and liabilities_row is not None:
+    bs_df = pd.DataFrame({
+        "Total Assets": assets_row,
+        "Total Liabilities": liabilities_row
+    })
     bs_df.index = bs_df.index.year
 
     fig_bs = go.Figure()
@@ -139,7 +164,7 @@ if not balance_sheet.empty:
     ))
     fig_bs.add_trace(go.Scatter(
         x=bs_df.index,
-        y=bs_df["Total Liab"],
+        y=bs_df["Total Liabilities"],
         name="Total Liabilities"
     ))
 
@@ -151,7 +176,8 @@ if not balance_sheet.empty:
 
     st.plotly_chart(fig_bs, use_container_width=True)
 else:
-    st.warning("Balance sheet data unavailable.")
+    st.warning("Balance sheet data unavailable for this company.")
+
 
 # ============================================================
 # KEY FINANCIAL RATIOS
