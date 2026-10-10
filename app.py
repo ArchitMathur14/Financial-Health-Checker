@@ -369,11 +369,11 @@ structured, and concise.
             try:
                 with st.spinner("Analyzing the company's financial data..."):
                     gemini_client = genai.Client(api_key=api_key)
-                    gemini_response = gemini_client.models.generate_content(
-                        model="gemini-2.5-flash",
-                        contents=prompt,
+                    gemini_response = gemini_client.interactions.create(
+                        model="gemini-3.8-flash",
+                        input=prompt,
                     )
-                    answer = (gemini_response.text or "").strip()
+                    answer = (gemini_response.output_text or "").strip()
                     if not answer:
                         answer = "The AI returned an empty response. Please try asking in a different way."
                 st.markdown(answer)
