@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import json
 import os
-from google import genai
+from groq import Groq
 
 
 # ============================================================
@@ -247,7 +247,7 @@ st.markdown("---")
 st.subheader("💬 AI Financial Analyst")
 st.markdown(
     "Ask questions about the selected company's financial health. "
-    "Python supplies the financial figures; Gemini explains them in plain language."
+    "Python supplies the financial figures; an open-weight AI model explains them in plain language."
 )
 
 with st.expander("About this AI analyst", expanded=False):
@@ -312,14 +312,14 @@ financial_context = {
 
 api_key = None
 try:
-    api_key = st.secrets.get("GOOGLE_API_KEY")
+    api_key = st.secrets.get("GROQ_API_KEY")
 except Exception:
     pass
-api_key = api_key or os.getenv("GOOGLE_API_KEY")
+api_key = api_key or os.getenv("GROQ_API_KEY")
 
 if not api_key:
     st.info(
-        "To enable chat, add a Gemini API key as GOOGLE_API_KEY in "
+        "To enable chat, create a free Groq API key and add it as GROQ_API_KEY in "
         "Streamlit Community Cloud App settings → Secrets. "
         "Do not paste your API key into this chat or commit it to GitHub."
     )
@@ -368,43 +368,36 @@ structured, and concise.
         with st.chat_message("assistant"):
             try:
                 with st.spinner("Analyzing the company's financial data..."):
-                    gemini_client = genai.Client(api_key=api_key)
-                    gemini_response = gemini_client.interactions.create(
-                        model="gemini-3.8-flash",
-                        input=prompt,
+                    groq_client = Groq(api_key=api_key)
+                    response = groq_client.chat.completions.create(
+                        model="openai/gpt-oss-20b",
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.2,
+                        max_tokens=900,
                     )
-                    answer = (gemini_response.output_text or "").strip()
+                    answer = (response.choices[0].message.content or "").strip()
                     if not answer:
                         answer = "The AI returned an empty response. Please try asking in a different way."
                 st.markdown(answer)
                 analyst_history.append({"role": "assistant", "content": answer})
             except Exception as exc:
                 error_text = str(exc)
-                if "project has been denied access" in error_text.lower() or (
-                    "permission_denied" in error_text.lower() and "403" in error_text
-                ):
+                if "401" in error_text or "invalid_api_key" in error_text.lower() or "authentication" in error_text.lower():
                     st.error(
-                        "Google has denied this project access to the Gemini API. "
-                        "This is a Google project/account permission issue, not an app-code error. "
-                        "Open Google AI Studio → Projects and Google Cloud Console → your project "
-                        "to check for an access-denied banner or appeal instructions. Also verify "
-                        "account age/phone verification and 2-Step Verification, then contact "
-                        "Google Cloud/Gemini API support if access is still denied."
+                        "Groq rejected the API key. Check that GROQ_API_KEY in Streamlit Cloud Secrets "
+                        "matches the key from the Groq Console, then save and restart the app."
                     )
                     with st.expander("Technical details"):
                         st.code(error_text)
-                elif "API_KEY_INVALID" in error_text or "api key not valid" in error_text.lower():
+                elif "429" in error_text or "rate_limit" in error_text.lower():
                     st.error(
-                        "Google rejected the API key. Replace GOOGLE_API_KEY in Streamlit Cloud "
-                        "Secrets with a valid Gemini authorization key, then restart the app."
+                        "The free Groq usage limit has been reached. Wait for the limit to reset, "
+                        "then try again. You do not need to upgrade to a paid plan to use the free tier."
                     )
                     with st.expander("Technical details"):
                         st.code(error_text)
                 else:
-                    st.error(
-                        "The AI request failed. Check Gemini API access, model availability, "
-                        "and quota. Technical detail: " + error_text
-                    )
+                    st.error("The Groq AI request failed. Technical detail: " + error_text)
 
     if analyst_history and st.button("Clear analyst chat", key="clear_financial_analyst_history"):
         st.session_state["financial_analyst_history"] = []
