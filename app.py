@@ -2,6 +2,9 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
+import json
+import os
+from google import genai
 
 
 # ============================================================
@@ -236,6 +239,158 @@ elif score >= 50:
     st.warning("Moderate financial health. Some risk factors present.")
 else:
     st.error("Weak financial health. High risk indicators detected.")
+
+
+
+# ============================================================
+# AI FINANCIAL ANALYST CHAT
+# ============================================================
+st.markdown("---")
+st.subheader("💬 AI Financial Analyst")
+st.markdown(
+    "Ask questions about the selected company's financial health. "
+    "Python supplies the financial figures; Gemini explains them in plain language."
+)
+
+with st.expander("About this AI analyst", expanded=False):
+    st.write(
+        "The analyst uses the current ticker's retrieved financial data, key ratios, "
+        "and health score as context. It is designed to disclose missing information "
+        "rather than invent figures. This tool is for education, not investment advice."
+    )
+
+def _safe_frame_context(frame, wanted_rows, max_periods=5):
+    if frame is None or frame.empty:
+        return {}
+    available = [row for row in wanted_rows if row in frame.index]
+    if not available:
+        return {}
+    subset = frame.loc[available].iloc[:, :max_periods].copy()
+    subset = subset.astype(object).where(pd.notna(subset), None)
+    result = {}
+    for column in subset.columns:
+        result[str(getattr(column, "year", column))] = {
+            str(index): (float(value) if isinstance(value, (int, float)) else value)
+            for index, value in subset[column].items()
+        }
+    return result
+
+financial_context = {
+    "ticker": ticker_symbol,
+    "company_name": info.get("longName") or info.get("shortName") or ticker_symbol,
+    "sector": info.get("sector"),
+    "industry": info.get("industry"),
+    "currency": info.get("currency"),
+    "market_cap": info.get("marketCap"),
+    "key_ratios_as_returned_by_yahoo_finance": ratios,
+    "app_financial_health_score_out_of_100": score,
+    "income_statement_recent_periods": _safe_frame_context(
+        financials,
+        ["Total Revenue", "Net Income", "Operating Income", "Gross Profit"],
+    ),
+    "balance_sheet_recent_periods": _safe_frame_context(
+        balance_sheet,
+        [
+            "Total Assets", "Total Liab", "Total Liabilities",
+            "Total Liabilities Net Minority Interest", "Total Debt",
+            "Stockholders Equity", "Total Stockholder Equity",
+            "Current Assets", "Current Liabilities",
+        ],
+    ),
+    "cash_flow_recent_periods": _safe_frame_context(
+        cashflow,
+        [
+            "Operating Cash Flow", "Free Cash Flow", "Capital Expenditure",
+            "Capital Expenditures",
+        ],
+    ),
+    "data_source": "Yahoo Finance via yfinance",
+    "limitations": [
+        "Available statement rows and periods vary by company.",
+        "Yahoo Finance data can be incomplete or delayed.",
+        "The health score is a simple rule-based indicator created by this app, not a validated credit rating.",
+    ],
+}
+
+api_key = None
+try:
+    api_key = st.secrets.get("GOOGLE_API_KEY")
+except Exception:
+    pass
+api_key = api_key or os.getenv("GOOGLE_API_KEY")
+
+if not api_key:
+    st.info(
+        "To enable chat, add a Gemini API key as GOOGLE_API_KEY in "
+        "Streamlit Community Cloud App settings → Secrets. "
+        "Do not paste your API key into this chat or commit it to GitHub."
+    )
+else:
+    analyst_history = st.session_state.setdefault("financial_analyst_history", [])
+    st.caption(f"Current company context: {financial_context['company_name']} ({ticker_symbol})")
+
+    for message in analyst_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    user_question = st.chat_input(
+        f"Ask the analyst about {ticker_symbol}...",
+        key="financial_analyst_question",
+    )
+
+    if user_question:
+        analyst_history.append({"role": "user", "content": user_question})
+        with st.chat_message("user"):
+            st.markdown(user_question)
+
+        system_instruction = """
+You are an AI Financial Analyst inside an educational company-analysis application.
+Use the provided JSON financial context for all company-specific numeric claims.
+Never invent financial figures, reporting periods, or causes for changes. If data is
+missing, say so explicitly. Distinguish retrieved facts from your interpretation.
+Explain ratios in clear language and mention relevant caveats. The displayed health
+score is a simple heuristic, not a validated credit rating. Do not provide personalized
+investment advice, guaranteed outcomes, or unsupported buy/sell recommendations.
+State when the supplied data is insufficient for a conclusion. Keep responses useful,
+structured, and concise.
+"""
+        recent_messages = analyst_history[-10:]
+        conversation = "\n\n".join(
+            f"{message['role'].upper()}: {message['content']}"
+            for message in recent_messages
+        )
+        prompt = (
+            f"{system_instruction}\n\n"
+            f"FINANCIAL CONTEXT JSON:\n"
+            f"{json.dumps(financial_context, default=str, ensure_ascii=False)}\n\n"
+            f"RECENT CONVERSATION:\n{conversation}\n\n"
+            "Answer the latest user question using the supplied context."
+        )
+
+        with st.chat_message("assistant"):
+            try:
+                with st.spinner("Analyzing the company's financial data..."):
+                    gemini_client = genai.Client(api_key=api_key)
+                    gemini_response = gemini_client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=prompt,
+                    )
+                    answer = (gemini_response.text or "").strip()
+                    if not answer:
+                        answer = "The AI returned an empty response. Please try asking in a different way."
+                st.markdown(answer)
+                analyst_history.append({"role": "assistant", "content": answer})
+            except Exception as exc:
+                st.error(
+                    "The AI request failed. Verify that the Gemini API key is valid, "
+                    "the API is enabled, and your usage quota is available. "
+                    f"Technical detail: {exc}"
+                )
+
+    if analyst_history and st.button("Clear analyst chat", key="clear_financial_analyst_history"):
+        st.session_state["financial_analyst_history"] = []
+        st.rerun()
+
 
 # ============================================================
 # FOOTER
