@@ -379,11 +379,32 @@ structured, and concise.
                 st.markdown(answer)
                 analyst_history.append({"role": "assistant", "content": answer})
             except Exception as exc:
-                st.error(
-                    "The AI request failed. Verify that the Gemini API key is valid, "
-                    "the API is enabled, and your usage quota is available. "
-                    f"Technical detail: {exc}"
-                )
+                error_text = str(exc)
+                if "project has been denied access" in error_text.lower() or (
+                    "permission_denied" in error_text.lower() and "403" in error_text
+                ):
+                    st.error(
+                        "Google has denied this project access to the Gemini API. "
+                        "This is a Google project/account permission issue, not an app-code error. "
+                        "Open Google AI Studio → Projects and Google Cloud Console → your project "
+                        "to check for an access-denied banner or appeal instructions. Also verify "
+                        "account age/phone verification and 2-Step Verification, then contact "
+                        "Google Cloud/Gemini API support if access is still denied."
+                    )
+                    with st.expander("Technical details"):
+                        st.code(error_text)
+                elif "API_KEY_INVALID" in error_text or "api key not valid" in error_text.lower():
+                    st.error(
+                        "Google rejected the API key. Replace GOOGLE_API_KEY in Streamlit Cloud "
+                        "Secrets with a valid Gemini authorization key, then restart the app."
+                    )
+                    with st.expander("Technical details"):
+                        st.code(error_text)
+                else:
+                    st.error(
+                        "The AI request failed. Check Gemini API access, model availability, "
+                        "and quota. Technical detail: " + error_text
+                    )
 
     if analyst_history and st.button("Clear analyst chat", key="clear_financial_analyst_history"):
         st.session_state["financial_analyst_history"] = []
