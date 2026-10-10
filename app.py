@@ -65,7 +65,13 @@ st.subheader("📈 Market Price Overview")
 all_time_high = hist["High"].max()
 all_time_low = hist["Low"].min()
 
-fifty_two_week_data = hist.last("365D")
+# DataFrame.last() was removed in newer pandas versions; filter the DatetimeIndex instead.
+if not hist.empty:
+    latest_date = hist.index.max()
+    cutoff_date = latest_date - pd.Timedelta(days=365)
+    fifty_two_week_data = hist.loc[hist.index >= cutoff_date]
+else:
+    fifty_two_week_data = hist
 high_52w = fifty_two_week_data["High"].max()
 low_52w = fifty_two_week_data["Low"].min()
 
